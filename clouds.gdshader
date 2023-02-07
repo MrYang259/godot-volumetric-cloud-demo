@@ -1,4 +1,4 @@
-// Cloud Raymarching based on: A. Schneider. “The Real-Time Volumetric Cloudscapes Of Horizon: Zero Dawn”. ACM SIGGRAPH. Los Angeles, CA: ACM SIGGRAPH, 2015. Web. 26 Aug. 2015.
+// Cloud Raymarching based on: A. Schneider. 鈥淭he Real-Time Volumetric Cloudscapes Of Horizon: Zero Dawn鈥? ACM SIGGRAPH. Los Angeles, CA: ACM SIGGRAPH, 2015. Web. 26 Aug. 2015.
 
 shader_type sky;
 render_mode use_half_res_pass, use_quarter_res_pass;
@@ -7,9 +7,9 @@ uniform sampler3D worlnoise : filter_linear_mipmap, repeat_enable;
 uniform sampler3D perlworlnoise : filter_linear_mipmap, repeat_enable;
 uniform sampler2D weathermap : filter_linear_mipmap, repeat_enable;
 
-uniform float _density : hint_range(0.01, 0.2) = 0.05;
-uniform float cloud_coverage :hint_range(0.1, 1.0) = 0.25;
-uniform float _time_scale :hint_range(0.0, 20.0) = 1.0;
+uniform float _density : hint_range(0.01, 0.2) = 0.04;
+uniform float cloud_coverage :hint_range(0.1, 1.0) = 0.2;
+uniform float _time_scale :hint_range(0.0, 20.0) = 0.4;
 uniform float _time_offset : hint_range(0.0, 1000.0, 0.5) = 0.0;
 
 // Approximately earth sizes
@@ -17,14 +17,14 @@ const float g_radius = 6000000.0; //ground radius
 const float sky_b_radius = 6001500.0;//bottom of cloud layer
 const float sky_t_radius = 6004000.0;//top of cloud layer
 
-uniform float rayleigh : hint_range(0, 64) = 2.0;
+uniform float rayleigh : hint_range(0, 64) = 2.4;
 uniform vec4 rayleigh_color : source_color = vec4(0.26, 0.41, 0.58, 1.0);
-uniform float mie : hint_range(0, 1) = 0.005;
+uniform float mie : hint_range(0, 1) = 0.003;
 uniform float mie_eccentricity : hint_range(-1, 1) = 0.8;
 uniform vec4 mie_color : source_color = vec4(0.63, 0.77, 0.92, 1.0);
 
-uniform float turbidity : hint_range(0, 1000) = 10.0;
-uniform float sun_disk_scale : hint_range(0, 360) = 1.0;
+uniform float turbidity : hint_range(0, 1000) = 15.0;
+uniform float sun_disk_scale : hint_range(0, 360) = 2.0;
 uniform vec4 ground_color : source_color = vec4(1.0);
 uniform float exposure : hint_range(0, 128) = 0.1;
 
@@ -98,7 +98,7 @@ vec3 atmosphere(vec3 eye_dir) {
 	float sunAngularDiameterCos2 = cos(SOL_SIZE * sun_disk_scale*0.5);
 	float sundisk = smoothstep(sunAngularDiameterCos, sunAngularDiameterCos2, cos_theta);
 	vec3 L0 = (sun_energy * 1900.0 * extinction) * sundisk * LIGHT0_COLOR;
-	// Note: Add nightime here: L0 += night_sky * extinction
+	//L0 += sun_energy * extinction; // Note: Add nightime here
 
 	vec3 color = (Lin + L0) * 0.04;
 	color = pow(color, vec3(1.0 / (1.2 + (1.2 * sun_fade))));
@@ -139,7 +139,7 @@ float intersectSphere(vec3 pos, vec3 dir,float r) {
 // Returns density at a given point
 // Heavily based on method from Schneider
 float density(vec3 pip, vec3 weather, float mip) {
-	float time = TIME;
+	float time = TIME * _time_scale;
 	vec3 p = pip;
 	p.x += time * 10.0 * _time_scale + _time_offset;
 	float height_fraction = GetHeightFractionForPoint(length(p));
@@ -160,28 +160,28 @@ float density(vec3 pip, vec3 weather, float mip) {
 
 vec4 march(vec3 pos,  vec3 end, vec3 dir, int depth) {
 	const vec3 RANDOM_VECTORS[6] = {vec3( 0.38051305f,  0.92453449f, -0.02111345f),vec3(-0.50625799f, -0.03590792f, -0.86163418f),vec3(-0.32509218f, -0.94557439f,  0.01428793f),vec3( 0.09026238f, -0.27376545f,  0.95755165f),vec3( 0.28128598f,  0.42443639f, -0.86065785f),vec3(-0.16852403f,  0.14748697f,  0.97460106f)};
-	float T = 1.0;
+	float T = 0.8; //云彩亮度
 	float alpha = 0.0;
 	float ss = length(dir);
 	dir = normalize(dir);
 	vec3 p = pos + hash(pos * 10.0) * ss;
 	const float t_dist = sky_t_radius-sky_b_radius;
-	float lss = (t_dist / 36.0);
+	float lss = (t_dist / 30.0);
 	vec3 ldir = normalize(LIGHT0_DIRECTION);
 	vec3 L = vec3(0.0);
 	int count=0;
 	float t = 1.0;
 	float costheta = dot(ldir, dir);
 	// Stack multiple phase functions to emulate some backscattering
-	float phase = max(max(henyey_greenstein(costheta, 0.6), henyey_greenstein(costheta, (0.4 - 1.4 * ldir.y))), henyey_greenstein(costheta, -0.2));
+	float phase = max(max(henyey_greenstein(costheta, 0.7), henyey_greenstein(costheta, (0.4 - 1.4 * ldir.y))), henyey_greenstein(costheta, -0.2));
 	// Precalculate sun and ambient colors
 	// This should really come from a uniform or texture for performance reasons
 	vec3 atmosphere_sun = atmosphere(LIGHT0_DIRECTION) * LIGHT0_ENERGY * ss * 0.1;
 	vec3 atmosphere_ambient = atmosphere(normalize(vec3(1.0, 1.0, 0.0)));
 	vec3 atmosphere_ground = atmosphere(normalize(vec3(1.0, -1.0, 0.0)));
 	
-	const float weather_scale = 0.00006;
-	const float time = TIME * 0.003 * _time_scale + 0.005*_time_offset;
+	const float weather_scale = 0.00008;
+	const float time = sin(TIME) * 0.003 * _time_scale + 0.005 * _time_offset;
 	const vec2 weather_pos = vec2(time * 0.9, time);
 	
 	for (int i = 0; i < depth; i++) {
@@ -227,7 +227,7 @@ vec4 march(vec3 pos,  vec3 end, vec3 dir, int depth) {
 }
 
 void sky() {
-	vec3 dir = EYEDIR;
+	vec3 dir = EYEDIR; //获得相机方向
 
 	vec4 col = vec4(0.0);
 	if (dir.y>0.0) {
@@ -238,7 +238,7 @@ void sky() {
 		// Take fewer steps towards horizon
 		float steps = (mix(96.0, 54.0, clamp(dot(dir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0)));
 		vec3 raystep = dir * shelldist / steps;
-		vec4 volume = march(start, end, raystep, int(steps));
+		vec4 volume = march(start, end, raystep, int(steps)); //光线步进
 		vec3 background = atmosphere(dir);
 		// Draw cloud shape
 		col = vec4(background*(1.0-volume.a)+volume.xyz, 1.0);
