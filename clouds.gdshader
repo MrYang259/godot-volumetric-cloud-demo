@@ -1,16 +1,16 @@
-// Cloud Raymarching based on: A. Schneider. 鈥淭he Real-Time Volumetric Cloudscapes Of Horizon: Zero Dawn鈥? ACM SIGGRAPH. Los Angeles, CA: ACM SIGGRAPH, 2015. Web. 26 Aug. 2015.
-
 shader_type sky;
 render_mode use_half_res_pass, use_quarter_res_pass;
 
-uniform sampler3D worlnoise : filter_linear_mipmap, repeat_enable;
-uniform sampler3D perlworlnoise : filter_linear_mipmap, repeat_enable;
+uniform sampler3D worlnoise : filter_linear_mipmap, repeat_enable; //导入设置：Texture3D，水平32，垂直1
+uniform sampler3D perlworlnoise : filter_linear_mipmap, repeat_enable; //导入设置：Texture3D，水平128，垂直1
 uniform sampler2D weathermap : filter_linear_mipmap, repeat_enable;
 
-uniform float _density : hint_range(0.01, 0.2) = 0.04;
-uniform float cloud_coverage :hint_range(0.1, 1.0) = 0.2;
+uniform float _density : hint_range(0.005, 0.2) = 0.012;
+uniform float cloud_coverage :hint_range(0.1, 1.0) = 0.24;
 uniform float _time_scale :hint_range(0.0, 20.0) = 0.4;
 uniform float _time_offset : hint_range(0.0, 1000.0, 0.5) = 0.0;
+uniform float _ray_steps : hint_range(16.0, 96.0, 1.0) = 16.0; //步进步数，方便调节
+uniform float _raymarch_jitter : hint_range(1.0, 256.0, 1.0) = 16.0; //新增的抖动系数，可以在一定程度上消除层纹，会引入噪点
 
 // Approximately earth sizes
 const float g_radius = 6000000.0; //ground radius
@@ -27,6 +27,7 @@ uniform float turbidity : hint_range(0, 1000) = 15.0;
 uniform float sun_disk_scale : hint_range(0, 360) = 2.0;
 uniform vec4 ground_color : source_color = vec4(1.0);
 uniform float exposure : hint_range(0, 128) = 0.1;
+uniform float brightness_offset : hint_range(-0.9, 0.9) = 0.0;
 
 const vec3 UP = vec3( 0.0, 1.0, 0.0 );
 
@@ -53,17 +54,17 @@ float remap(float originalValue,  float originalMin,  float originalMax,  float 
 // Phase function
 float henyey_greenstein(float cos_theta, float g) {
 	const float k = 0.0795774715459;
-	return k * (1.0 - g * g) / (pow(1.0 + g * g - 2.0 * g * cos_theta, 1.5));
+	return k * (1.0 + brightness_offset - g * g) / (pow(1.0 + g * g - 2.0 * g * cos_theta, 1.5));
 }
 
 // Simple Analytic sky. In a real project you should use a texture
 vec3 atmosphere(vec3 eye_dir) {
 	float zenith_angle = clamp( dot(UP, normalize(LIGHT0_DIRECTION)), -1.0, 1.0 );
-	float sun_energy = max(0.0, 1.0 - exp(-((PI * 0.5) - acos(zenith_angle)))) * SUN_ENERGY * LIGHT0_ENERGY;
+	float sun_energy = max(0.0, 1.2 - exp(-((PI * 0.5) - acos(zenith_angle)))) * SUN_ENERGY * LIGHT0_ENERGY;// * exp(-cloud_coverage* 2.0);
 	float sun_fade = 1.0 - clamp(1.0 - exp(LIGHT0_DIRECTION.y), 0.0, 1.0);
 
 	// Rayleigh coefficients.
-	float rayleigh_coefficient = rayleigh - ( 1.0 * ( 1.0 - sun_fade ) );
+	float rayleigh_coefficient = rayleigh - ( 1.0 * ( 1.0 - sun_fade ));
 	vec3 rayleigh_beta = rayleigh_coefficient * rayleigh_color.rgb * 0.0001;
 	// mie coefficients from Preetham
 	vec3 mie_beta = turbidity * mie * mie_color.rgb * 0.000434;
@@ -126,7 +127,7 @@ float densityHeightGradient(float heightFrac, float cloudType) {
 	return smoothstep(cloudGradient.x, cloudGradient.y, heightFrac) - smoothstep(cloudGradient.z, cloudGradient.w, heightFrac);
 }
 
-float intersectSphere(vec3 pos, vec3 dir,float r) {
+float intersectSphere(vec3 pos, vec3 dir,float r) { //求视线方向与球体相交交点的距离
     float a = dot(dir, dir);
     float b = 2.0 * dot(dir, pos);
     float c = dot(pos, pos) - (r * r);
@@ -160,7 +161,7 @@ float density(vec3 pip, vec3 weather, float mip) {
 
 vec4 march(vec3 pos,  vec3 end, vec3 dir, int depth) {
 	const vec3 RANDOM_VECTORS[6] = {vec3( 0.38051305f,  0.92453449f, -0.02111345f),vec3(-0.50625799f, -0.03590792f, -0.86163418f),vec3(-0.32509218f, -0.94557439f,  0.01428793f),vec3( 0.09026238f, -0.27376545f,  0.95755165f),vec3( 0.28128598f,  0.42443639f, -0.86065785f),vec3(-0.16852403f,  0.14748697f,  0.97460106f)};
-	float T = 0.8; //云彩亮度
+	float T = 1.0; //
 	float alpha = 0.0;
 	float ss = length(dir);
 	dir = normalize(dir);
@@ -169,7 +170,6 @@ vec4 march(vec3 pos,  vec3 end, vec3 dir, int depth) {
 	float lss = (t_dist / 30.0);
 	vec3 ldir = normalize(LIGHT0_DIRECTION);
 	vec3 L = vec3(0.0);
-	int count=0;
 	float t = 1.0;
 	float costheta = dot(ldir, dir);
 	// Stack multiple phase functions to emulate some backscattering
@@ -181,8 +181,8 @@ vec4 march(vec3 pos,  vec3 end, vec3 dir, int depth) {
 	vec3 atmosphere_ground = atmosphere(normalize(vec3(1.0, -1.0, 0.0)));
 	
 	const float weather_scale = 0.00008;
-	const float time = sin(TIME) * 0.003 * _time_scale + 0.005 * _time_offset;
-	const vec2 weather_pos = vec2(time * 0.9, time);
+	float time = sin(TIME) * 0.003 * _time_scale + 0.005 * _time_offset;
+	vec2 weather_pos = vec2(time * 0.9, time);
 	
 	for (int i = 0; i < depth; i++) {
 		p += dir * ss;
@@ -227,23 +227,27 @@ vec4 march(vec3 pos,  vec3 end, vec3 dir, int depth) {
 }
 
 void sky() {
-	vec3 dir = EYEDIR; //获得相机方向
-
+	vec3 dir = EYEDIR;
+	float random1 = fract(sin(dot(SKY_COORDS, vec2(12.9898, 78.2633))) * 43758.5453123) * _raymarch_jitter;
+	float random2 = fract(sin(dot(SKY_COORDS, vec2(12.9898, 78.2453))) * 23358.5453123) * _raymarch_jitter;
 	vec4 col = vec4(0.0);
 	if (dir.y>0.0) {
 		vec3 camPos = vec3(0.0, g_radius, 0.0);
+		//步进起点
 		vec3 start = camPos + dir * intersectSphere(camPos, dir, sky_b_radius);
+		//步进终点
 		vec3 end = camPos + dir * intersectSphere(camPos, dir, sky_t_radius);
 		float shelldist = (length(end-start));
-		// Take fewer steps towards horizon
-		float steps = (mix(96.0, 54.0, clamp(dot(dir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0)));
+		//性能的关键点，步数直接决定了效果与性能，作者最初的值是96和54
+		//float steps = (mix(128.0 / 16.0, 96.0 / 16.0, clamp(dot(dir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0))); //视线向上则采样步数更接近54步
+		float steps = (mix(_ray_steps, floor(_ray_steps * 0.75), clamp(dot(dir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0))); //高画质，低性能
 		vec3 raystep = dir * shelldist / steps;
-		vec4 volume = march(start, end, raystep, int(steps)); //光线步进
+		vec4 volume = march(vec3(start.x + random1,start.y,start.z+random2), vec3(end.x, end.y - random1, end.z), raystep, int(steps));
 		vec3 background = atmosphere(dir);
 		// Draw cloud shape
 		col = vec4(background*(1.0-volume.a)+volume.xyz, 1.0);
 		// Blend distant clouds into the sky
-		col.xyz = mix(clamp(col.xyz, vec3(0.0), vec3(1.0)), clamp(background, vec3(0.0), vec3(1.0)), smoothstep(0.6, 1.0, 1.0-dir.y));
+		col.xyz = mix(clamp(col.xyz, vec3(0.0), vec3(1.0)), clamp(background, vec3(0.0), vec3(1.0)), smoothstep(0.5, 1.0, 1.0-dir.y));
 	} else {
 		col = vec4(atmosphere(dir), 1.0);
 	}
