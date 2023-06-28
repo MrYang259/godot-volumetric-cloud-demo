@@ -16,3 +16,8 @@ Renderer: Vulkan
 ![Screenshot](screenshots/Dusk.png)
 
 ![Screenshot](screenshots/Sunset.png)
+
+# The modification I made was wrote into clouds.gdshader
+
+In short,fixed a small reset problem of orginal demo and added
+a positional jitter to raymarch
