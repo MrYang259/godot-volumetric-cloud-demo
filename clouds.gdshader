@@ -1,3 +1,13 @@
+/*Difference to master ClayJhon's original demo
+This demo use sinusoidal time rather than GDshader's orignal
+TIME so it won't suddenly reset.And added a random jitter to
+raymarch start point so striated pattern when low raymarch steps will reduce,
+but this introduce a lot of noise if jitter value turns high. Didn't find a way to denoise though*/
+
+/*和大佬ClayJhon原版Demo的区别
+使用sin函数来回摇摆时间值，避免运行中突然重置的现象
+加入步进起点位置的抖动，防止步进数太低导致层纹状图案，但在高抖动长度的情况下会引入大量的噪点，还没找到降噪的办法*/
+
 shader_type sky;
 render_mode use_half_res_pass, use_quarter_res_pass;
 
@@ -10,7 +20,7 @@ uniform float cloud_coverage :hint_range(0.1, 1.0) = 0.24;
 uniform float _time_scale :hint_range(0.0, 20.0) = 0.4;
 uniform float _time_offset : hint_range(0.0, 1000.0, 0.5) = 0.0;
 uniform float _ray_steps : hint_range(16.0, 96.0, 1.0) = 16.0; //步进步数，方便调节
-uniform float _raymarch_jitter : hint_range(1.0, 256.0, 1.0) = 16.0; //新增的抖动系数，可以在一定程度上消除层纹，会引入噪点
+uniform float _raymarch_jitter : hint_range(1.0, 256.0, 1.0) = 16.0; //新增的抖动长度系数，可以在一定程度上消除层纹，会引入噪点
 
 // Approximately earth sizes
 const float g_radius = 6000000.0; //ground radius
@@ -239,7 +249,6 @@ void sky() {
 		vec3 end = camPos + dir * intersectSphere(camPos, dir, sky_t_radius);
 		float shelldist = (length(end-start));
 		//性能的关键点，步数直接决定了效果与性能，作者最初的值是96和54
-		//float steps = (mix(128.0 / 16.0, 96.0 / 16.0, clamp(dot(dir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0))); //视线向上则采样步数更接近54步
 		float steps = (mix(_ray_steps, floor(_ray_steps * 0.75), clamp(dot(dir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0))); //高画质，低性能
 		vec3 raystep = dir * shelldist / steps;
 		vec4 volume = march(vec3(start.x + random1,start.y,start.z+random2), vec3(end.x, end.y - random1, end.z), raystep, int(steps));
@@ -251,7 +260,7 @@ void sky() {
 	} else {
 		col = vec4(atmosphere(dir), 1.0);
 	}
-	
+	//should denoise somehow(应该想办法在这里降噪)
 	// Draw to quarter res buffer for reflections
 	// Draw to half res buffer for main sky
 	if (AT_QUARTER_RES_PASS && AT_CUBEMAP_PASS) {
